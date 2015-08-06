@@ -357,21 +357,27 @@ LOOP:
             for (Map.Entry<Node, Set<EdgeType>> e : node.getChildEdges().entrySet()) {
                 Node child = e.getKey();
                 if (!nodes.contains(child)) continue;
-                result.append(node.getName());
-                result.append(" -> ");
-                result.append(e.getKey().getName());
-                result.append(" [ label = \"");
-                boolean first = true;
                 for (EdgeType et : e.getValue()) {
-                    if (first) {
-                        result.append(et.name());
-                        first = false;
-                    } else {
-                        result.append(", ");
-                        result.append(et.name());
+                    result.append(node.getName());
+                    result.append(" -> ");
+                    result.append(e.getKey().getName());
+                    result.append(" [ color=");
+                    switch (et) {
+                        case DEPENDENCY:
+                            result.append("red");
+                            break;
+                        case LOAD_BEFORE:
+                            result.append("green");
+                            break;
+                        case SOFT_DEPENDENCY:
+                            result.append("yellow");
+                            break;
+                        case WORLD_LOAD:
+                            result.append("blue");
+                            break;
                     }
+                    result.append(" ];");
                 }
-                result.append("\" ];\n");
             }
         }
         result.append("}\n");
