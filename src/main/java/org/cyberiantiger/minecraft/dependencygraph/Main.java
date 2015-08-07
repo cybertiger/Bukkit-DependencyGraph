@@ -1,11 +1,14 @@
 package org.cyberiantiger.minecraft.dependencygraph;
 
 import com.google.common.base.Charsets;
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
 import java.io.Writer;
+import java.util.List;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.server.PluginDisableEvent;
@@ -82,5 +85,32 @@ public class Main extends JavaPlugin implements Listener {
         } catch (IOException ex) {
             getLogger().info("Failed to write dependency graph");
         }
+        file = new File(getDataFolder(), "load_orders.txt");
+        try {
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(new BufferedOutputStream(new FileOutputStream(file)), Charsets.UTF_8));
+            try {
+                out.println("Init order:");
+                for (String s : graph.getInitOrder()) {
+                    out.print("    ");
+                    out.println(s);
+                }
+                out.println("Startup enable order:");
+                List<String>[] enableOrders = graph.getEnableOrder();
+                for (String s : enableOrders[0]) {
+                    out.print("    ");
+                    out.println(s);
+                }
+                out.println("Postworld enable order:");
+                for (String s : enableOrders[1]) {
+                    out.print("    ");
+                    out.println(s);
+                }
+            } finally {
+                out.close();
+            }
+        } catch (IOException ex) {
+            getLogger().info("Failed to write dependency graph");
+        }
+
     }
 }

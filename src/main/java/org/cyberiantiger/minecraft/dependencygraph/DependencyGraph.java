@@ -156,19 +156,25 @@ final class DependencyGraph {
 
     List<String> getInitOrder() {
         // Depth first topological sort.
-        Set<Node> sorted = new LinkedHashSet<Node>();
+        Set<Node> head = new LinkedHashSet<Node>();
+        Set<Node> tail = new LinkedHashSet<Node>();
         List<Node> remaining = new LinkedList<Node>(pluginNodeMap.values());
         remaining.add(worldLoad);
         // Do some really dumb stuff to break cyclic dependencies.
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE, EdgeType.WORLD_LOAD));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.DEPENDENCY));
-        sorted.addAll(remaining);
-        List<String> result = new ArrayList<String>(sorted.size()-1);
-        for (Node node : sorted) {
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE, EdgeType.WORLD_LOAD));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.DEPENDENCY));
+        List<String> result = new ArrayList<String>(head.size() + tail.size() - 1);
+        for (Node node : head) {
             if (node instanceof PluginNode) {
                 result.add(((PluginNode)node).getDescription().getName());
+            }
+        }
+        int insertAt = result.size();
+        for (Node node : tail) {
+            if (node instanceof PluginNode) {
+                result.add(insertAt, ((PluginNode)node).getDescription().getName());
             }
         }
         return result;
@@ -176,19 +182,20 @@ final class DependencyGraph {
 
     List<String>[] getEnableOrder() {
         // Depth first topological sort.
-        Set<Node> sorted = new LinkedHashSet<Node>();
+        Set<Node> head = new LinkedHashSet<Node>();
+        Set<Node> tail = new LinkedHashSet<Node>();
         List<Node> remaining = new LinkedList<Node>(pluginNodeMap.values());
         remaining.add(worldLoad);
         // Do some really dumb stuff to break cyclic dependencies.
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY));
-        depthFirstChildSort(sorted, remaining, EnumSet.of(EdgeType.WORLD_LOAD));
-        sorted.addAll(remaining); // Should probably be assert(remaining.isEmpty())
-        List<String> startup = new ArrayList<String>(sorted.size());
-        List<String> postworld = new ArrayList<String>(sorted.size());
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY, EdgeType.LOAD_BEFORE));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY, EdgeType.SOFT_DEPENDENCY));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.WORLD_LOAD, EdgeType.DEPENDENCY));
+        depthFirstSort(head, tail, remaining, EnumSet.of(EdgeType.WORLD_LOAD));
+        head.addAll(remaining); // Should probably be assert(remaining.isEmpty())
+        List<String> startup = new ArrayList<String>();
+        List<String> postworld = new ArrayList<String>();
         boolean postWorld = false;
-        for (Node node : sorted) {
+        for (Node node : head) {
             if (node == worldLoad) {
                 postWorld = true;
             } else {
@@ -197,6 +204,21 @@ final class DependencyGraph {
                     postworld.add(pluginNode.getDescription().getName());
                 } else {
                     startup.add(pluginNode.getDescription().getName());
+                }
+            }
+        }
+        int postWorldInsert = postworld.size();
+        int startupInsert = startup.size();
+        postWorld = true;
+        for (Node node : tail) {
+            if (node == worldLoad) {
+                postWorld = false;
+            } else {
+                PluginNode pluginNode = (PluginNode) node;
+                if (postWorld) {
+                    postworld.add(postWorldInsert, pluginNode.getDescription().getName());
+                } else {
+                    startup.add(startupInsert, pluginNode.getDescription().getName());
                 }
             }
         }
@@ -254,30 +276,26 @@ final class DependencyGraph {
     }
 
     // Used to calculate load order
-    private static void depthFirstChildSort(Set<Node> sorted, List<Node> remaining, Set<EdgeType> types) {
+    private static void depthFirstSort(Set<Node> head, Set<Node> tail, List<Node> remaining, Set<EdgeType> types) {
         while (!remaining.isEmpty()) {
             boolean progress = false;
             Iterator<Node> i = remaining.iterator();
 LOOP:
             while (i.hasNext()) {
                 Node node = i.next();
-                for (Map.Entry<Node, Set<EdgeType>> e : node.getChildEdges().entrySet()) {
-                    Node child = e.getKey();
-                    Set<EdgeType> edgeTypes = e.getValue();
-                    boolean testEdge = false;
-                    for (EdgeType type : types) {
-                        if (edgeTypes.contains(type)) {
-                            testEdge = true;
-                            break;
-                        }
-                    }
-                    if (testEdge && !sorted.contains(child)) {
-                        continue LOOP;
-                    }
+                // Nodes with no valid child deps in head.
+                if (testEdges(head, node.getChildEdges(), types)) {
+                    head.add(node);
+                    i.remove();
+                    progress = true;
+                    continue;
                 }
-                sorted.add(node);
-                i.remove();
-                progress = true;
+                // Nodes with no valid parent deps in tail.
+                if (testEdges(tail, node.getParentEdges(), types)) {
+                    tail.add(node);
+                    i.remove();
+                    progress = true;
+                }
             }
             if (!progress) {
                 break;
@@ -285,36 +303,20 @@ LOOP:
         }
     }
 
-    // No actual use for this, since it's the reverse of what we need.
-    private static void depthFirstParentSort(Set<Node> sorted, List<Node> remaining, Set<EdgeType> types) {
-        while (!remaining.isEmpty()) {
-            boolean progress = false;
-            Iterator<Node> i = remaining.iterator();
-LOOP:
-            while (i.hasNext()) {
-                Node node = i.next();
-                for (Map.Entry<Node, Set<EdgeType>> e : node.getParentEdges().entrySet()) {
-                    Node parent = e.getKey();
-                    Set<EdgeType> edgeTypes = e.getValue();
-                    boolean testEdge = false;
-                    for (EdgeType type : types) {
-                        if (edgeTypes.contains(type)) {
-                            testEdge = true;
-                            break;
-                        }
-                    }
-                    if (testEdge && !sorted.contains(parent)) {
-                        continue LOOP;
+    /**
+     * Return true if all edges with types which intersect types are contained in done.
+     */
+    private static boolean testEdges(Set<Node> done, Map<Node, Set<EdgeType>> edges, Set<EdgeType> types) {
+        for (Map.Entry<Node, Set<EdgeType>> e : edges.entrySet()) {
+            if (!done.contains(e.getKey())) {
+                for (EdgeType type : e.getValue()) {
+                    if(types.contains(type)) {
+                        return false;
                     }
                 }
-                sorted.add(node);
-                i.remove();
-                progress = true;
-            }
-            if (!progress) {
-                break;
             }
         }
+        return true;
     }
 
     public String toDot() {
@@ -331,9 +333,9 @@ LOOP:
     public String toCircularDot() {
         List<Node> nodes = new ArrayList(pluginNodeMap.values());
         nodes.add(worldLoad);
-        Set<Node> done = new LinkedHashSet<Node>();
-        depthFirstChildSort(done, nodes, EnumSet.allOf(EdgeType.class));
-        depthFirstParentSort(done, nodes, EnumSet.allOf(EdgeType.class));
+        Set<Node> head = new LinkedHashSet<Node>();
+        Set<Node> tail = new LinkedHashSet<Node>();
+        depthFirstSort(head, tail, nodes, EnumSet.allOf(EdgeType.class));
         Set<Node> remaining = new HashSet<Node>(nodes);
         return toDotFile(remaining);
     }
